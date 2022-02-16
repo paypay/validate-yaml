@@ -8,6 +8,13 @@ inputs:
   schemaPath:
     description: "Path to schema to validate against"
     required: true
+  allow_failure:
+    description: 'Makes the Action fail on Validation error.'
+    default: false
+    required: false
+outputs:
+  inValid_files_count:
+    description: 'inValid files count.'
 runs:
   using: "node12"
   main: "dist/index.js"

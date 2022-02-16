@@ -5,7 +5,8 @@ import {Validator} from '../lib/validate'
 t.test('valid yaml files', async () => {
   const validator = new Validator({
     files: ['src/__tests__/valid.yaml'],
-    schemaPath: 'src/__tests__/schema.json'
+    schemaPath: 'src/__tests__/schema.json',
+    validatorLog: 'validator.log'
   })
 
   await t.expect(validator.ValidateYAML()).resolves.toBe(0)

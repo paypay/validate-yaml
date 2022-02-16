@@ -4,7 +4,7 @@ import fs from 'fs'
 export interface ValidatorProps {
   files: string[]
   schemaPath: string
-  
+  validatorLog: string
 }
 
 export class Validator {
@@ -18,7 +18,7 @@ export class Validator {
     return new Promise((resolve, reject) => {
       const structure = fs.readFileSync(this.props.schemaPath, { encoding: 'utf-8' })
       const validator = new YamlValidator({
-        log: 'validator.log',
+        log: this.props.validatorLog,
         structure: JSON.parse(structure),
         writeJson: false,
         onWarning: (err, file) => {

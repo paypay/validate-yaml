@@ -34,17 +34,31 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(186));
 const validate_1 = __nccwpck_require__(751);
+const fs_1 = __importDefault(__nccwpck_require__(147));
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            const logFile = 'validator.log';
             const validator = new validate_1.Validator({
                 files: core.getMultilineInput('files'),
-                schemaPath: core.getInput('schemaPath')
+                schemaPath: core.getInput('schemaPath'),
+                validatorLog: logFile
             });
-            yield validator.ValidateYAML();
+            const inValidFilesCount = yield validator.ValidateYAML();
+            const validatorLog = fs_1.default.readFileSync(logFile, { encoding: 'utf-8' });
+            core.info(validatorLog);
+            if (inValidFilesCount === 0) {
+                core.info('🎉 All files successfully validated');
+            }
+            else {
+                core.setFailed('❗Validation error(s)');
+            }
         }
         catch (error) {
             core.setFailed(error.message);
@@ -86,7 +100,7 @@ class Validator {
             return new Promise((resolve, reject) => {
                 const structure = fs_1.default.readFileSync(this.props.schemaPath, { encoding: 'utf-8' });
                 const validator = new yaml_validator_1.default({
-                    log: 'validator.log',
+                    log: this.props.validatorLog,
                     structure: JSON.parse(structure),
                     writeJson: false,
                     onWarning: (err, file) => {
@@ -1378,23 +1392,541 @@ exports.checkBypass = checkBypass;
 
 /***/ }),
 
-/***/ 34:
+/***/ 294:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-/*! check-type@v0.4.11 - 2014-06-28 */
-!function(){"use strict";var a,b,c;a=function(_){var a,b={};return a=function(c){var d={};return d.is=function(a){var d;if(!_.isString(a))throw new Error("Provided type is not a string");if(d=b["is"+a.toLowerCase()],!_.isFunction(d))throw new Error("Unsupported type",a);return d(c)},d.is.not=function(a){return!this(a)},d.has=function(a){var b,d,e=!0;if(!_.isString(a))throw new Error("Provided path is not a string");return b=a.split("."),d=c,b.forEach(function(a){e&&_.isObject(d)&&!_.isUndefined(d[a])?d=d[a]:e=!1}),e},d.matches=function(b){var d=!0;if(!_.isObject(b))throw new Error("Provided stucture is not an object");return _.isObject(c)?(_.each(b,function(b,e){a(c[e]).is.not(b)&&(d=!1)}),d):!1},d},a.init=function(a,c){var d,e;return _.isUndefined(a)?(a=_,e=_.without(_.functions(a),"isEqual")):e=_.functions(a),d=_.reduce(e,function(b,c){return b[c]=a[c],b},{}),Object.keys(d).forEach(function(a){a.match(/^is[A-Z]/)&&(_.isUndefined(b[a.toLowerCase()])||c)&&(b[a.toLowerCase()]=d[a])}),this},a.clear=function(){return b={},this},a}, true&&(module.exports=a(__nccwpck_require__(987))),"undefined"!=typeof define?define(["underscore"],function(_){return a(_)}):"undefined"!=typeof window&&(b=a(window._),c=function(){var a=window.check;return function(){return b===window.check&&(window.check=a),b}}(),b.noConflict=c,window.check=b)}();
+module.exports = __nccwpck_require__(219);
+
 
 /***/ }),
 
-/***/ 917:
+/***/ 219:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var net = __nccwpck_require__(808);
+var tls = __nccwpck_require__(404);
+var http = __nccwpck_require__(685);
+var https = __nccwpck_require__(687);
+var events = __nccwpck_require__(361);
+var assert = __nccwpck_require__(491);
+var util = __nccwpck_require__(837);
+
+
+exports.httpOverHttp = httpOverHttp;
+exports.httpsOverHttp = httpsOverHttp;
+exports.httpOverHttps = httpOverHttps;
+exports.httpsOverHttps = httpsOverHttps;
+
+
+function httpOverHttp(options) {
+  var agent = new TunnelingAgent(options);
+  agent.request = http.request;
+  return agent;
+}
+
+function httpsOverHttp(options) {
+  var agent = new TunnelingAgent(options);
+  agent.request = http.request;
+  agent.createSocket = createSecureSocket;
+  agent.defaultPort = 443;
+  return agent;
+}
+
+function httpOverHttps(options) {
+  var agent = new TunnelingAgent(options);
+  agent.request = https.request;
+  return agent;
+}
+
+function httpsOverHttps(options) {
+  var agent = new TunnelingAgent(options);
+  agent.request = https.request;
+  agent.createSocket = createSecureSocket;
+  agent.defaultPort = 443;
+  return agent;
+}
+
+
+function TunnelingAgent(options) {
+  var self = this;
+  self.options = options || {};
+  self.proxyOptions = self.options.proxy || {};
+  self.maxSockets = self.options.maxSockets || http.Agent.defaultMaxSockets;
+  self.requests = [];
+  self.sockets = [];
+
+  self.on('free', function onFree(socket, host, port, localAddress) {
+    var options = toOptions(host, port, localAddress);
+    for (var i = 0, len = self.requests.length; i < len; ++i) {
+      var pending = self.requests[i];
+      if (pending.host === options.host && pending.port === options.port) {
+        // Detect the request to connect same origin server,
+        // reuse the connection.
+        self.requests.splice(i, 1);
+        pending.request.onSocket(socket);
+        return;
+      }
+    }
+    socket.destroy();
+    self.removeSocket(socket);
+  });
+}
+util.inherits(TunnelingAgent, events.EventEmitter);
+
+TunnelingAgent.prototype.addRequest = function addRequest(req, host, port, localAddress) {
+  var self = this;
+  var options = mergeOptions({request: req}, self.options, toOptions(host, port, localAddress));
+
+  if (self.sockets.length >= this.maxSockets) {
+    // We are over limit so we'll add it to the queue.
+    self.requests.push(options);
+    return;
+  }
+
+  // If we are under maxSockets create a new one.
+  self.createSocket(options, function(socket) {
+    socket.on('free', onFree);
+    socket.on('close', onCloseOrRemove);
+    socket.on('agentRemove', onCloseOrRemove);
+    req.onSocket(socket);
+
+    function onFree() {
+      self.emit('free', socket, options);
+    }
+
+    function onCloseOrRemove(err) {
+      self.removeSocket(socket);
+      socket.removeListener('free', onFree);
+      socket.removeListener('close', onCloseOrRemove);
+      socket.removeListener('agentRemove', onCloseOrRemove);
+    }
+  });
+};
+
+TunnelingAgent.prototype.createSocket = function createSocket(options, cb) {
+  var self = this;
+  var placeholder = {};
+  self.sockets.push(placeholder);
+
+  var connectOptions = mergeOptions({}, self.proxyOptions, {
+    method: 'CONNECT',
+    path: options.host + ':' + options.port,
+    agent: false,
+    headers: {
+      host: options.host + ':' + options.port
+    }
+  });
+  if (options.localAddress) {
+    connectOptions.localAddress = options.localAddress;
+  }
+  if (connectOptions.proxyAuth) {
+    connectOptions.headers = connectOptions.headers || {};
+    connectOptions.headers['Proxy-Authorization'] = 'Basic ' +
+        new Buffer(connectOptions.proxyAuth).toString('base64');
+  }
+
+  debug('making CONNECT request');
+  var connectReq = self.request(connectOptions);
+  connectReq.useChunkedEncodingByDefault = false; // for v0.6
+  connectReq.once('response', onResponse); // for v0.6
+  connectReq.once('upgrade', onUpgrade);   // for v0.6
+  connectReq.once('connect', onConnect);   // for v0.7 or later
+  connectReq.once('error', onError);
+  connectReq.end();
+
+  function onResponse(res) {
+    // Very hacky. This is necessary to avoid http-parser leaks.
+    res.upgrade = true;
+  }
+
+  function onUpgrade(res, socket, head) {
+    // Hacky.
+    process.nextTick(function() {
+      onConnect(res, socket, head);
+    });
+  }
+
+  function onConnect(res, socket, head) {
+    connectReq.removeAllListeners();
+    socket.removeAllListeners();
+
+    if (res.statusCode !== 200) {
+      debug('tunneling socket could not be established, statusCode=%d',
+        res.statusCode);
+      socket.destroy();
+      var error = new Error('tunneling socket could not be established, ' +
+        'statusCode=' + res.statusCode);
+      error.code = 'ECONNRESET';
+      options.request.emit('error', error);
+      self.removeSocket(placeholder);
+      return;
+    }
+    if (head.length > 0) {
+      debug('got illegal response body from proxy');
+      socket.destroy();
+      var error = new Error('got illegal response body from proxy');
+      error.code = 'ECONNRESET';
+      options.request.emit('error', error);
+      self.removeSocket(placeholder);
+      return;
+    }
+    debug('tunneling connection has established');
+    self.sockets[self.sockets.indexOf(placeholder)] = socket;
+    return cb(socket);
+  }
+
+  function onError(cause) {
+    connectReq.removeAllListeners();
+
+    debug('tunneling socket could not be established, cause=%s\n',
+          cause.message, cause.stack);
+    var error = new Error('tunneling socket could not be established, ' +
+                          'cause=' + cause.message);
+    error.code = 'ECONNRESET';
+    options.request.emit('error', error);
+    self.removeSocket(placeholder);
+  }
+};
+
+TunnelingAgent.prototype.removeSocket = function removeSocket(socket) {
+  var pos = this.sockets.indexOf(socket)
+  if (pos === -1) {
+    return;
+  }
+  this.sockets.splice(pos, 1);
+
+  var pending = this.requests.shift();
+  if (pending) {
+    // If we have pending requests and a socket gets closed a new one
+    // needs to be created to take over in the pool for the one that closed.
+    this.createSocket(pending, function(socket) {
+      pending.request.onSocket(socket);
+    });
+  }
+};
+
+function createSecureSocket(options, cb) {
+  var self = this;
+  TunnelingAgent.prototype.createSocket.call(self, options, function(socket) {
+    var hostHeader = options.request.getHeader('host');
+    var tlsOptions = mergeOptions({}, self.options, {
+      socket: socket,
+      servername: hostHeader ? hostHeader.replace(/:.*$/, '') : options.host
+    });
+
+    // 0 is dummy port for v0.6
+    var secureSocket = tls.connect(0, tlsOptions);
+    self.sockets[self.sockets.indexOf(socket)] = secureSocket;
+    cb(secureSocket);
+  });
+}
+
+
+function toOptions(host, port, localAddress) {
+  if (typeof host === 'string') { // since v0.10
+    return {
+      host: host,
+      port: port,
+      localAddress: localAddress
+    };
+  }
+  return host; // for v0.11 or later
+}
+
+function mergeOptions(target) {
+  for (var i = 1, len = arguments.length; i < len; ++i) {
+    var overrides = arguments[i];
+    if (typeof overrides === 'object') {
+      var keys = Object.keys(overrides);
+      for (var j = 0, keyLen = keys.length; j < keyLen; ++j) {
+        var k = keys[j];
+        if (overrides[k] !== undefined) {
+          target[k] = overrides[k];
+        }
+      }
+    }
+  }
+  return target;
+}
+
+
+var debug;
+if (process.env.NODE_DEBUG && /\btunnel\b/.test(process.env.NODE_DEBUG)) {
+  debug = function() {
+    var args = Array.prototype.slice.call(arguments);
+    if (typeof args[0] === 'string') {
+      args[0] = 'TUNNEL: ' + args[0];
+    } else {
+      args.unshift('TUNNEL:');
+    }
+    console.error.apply(console, args);
+  }
+} else {
+  debug = function() {};
+}
+exports.debug = debug; // for test
+
+
+/***/ }),
+
+/***/ 551:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/**
+ * yaml-validator
+ * https://github.com/paazmaya/yaml-validator
+ *
+ * Copyright (c) Juga Paazmaya <paazmaya@yahoo.com> (https://paazmaya.fi)
+ * Licensed under the MIT license.
+ */
+
+const fs = __nccwpck_require__(147);
+
+const yaml = __nccwpck_require__(688);
+const check = (__nccwpck_require__(301).init)();
+
+const FIND_LINENUMBER = /line (\d+)/u;
+
+class YamlValidatore {
+  constructor (options) {
+    this.options = Object.assign({
+      log: false,
+      structure: false,
+      onWarning: null,
+      writeJson: false
+    }, options);
+
+    this.logs = [];
+    this.nonValidPaths = []; // list of property paths
+    this.inValidFilesCount = 0;
+  }
+
+  /**
+   * Store log messages
+   * possible later use by writing a log file.
+   * @param {string} msg Error message
+   * @returns {void}
+   */
+  errored(msg) {
+    this.logs.push(msg);
+  }
+
+  /**
+   * Check that the given structure is available.
+   * @param {Object} doc Object loaded from Yaml file
+   * @param {Object} structure Structure requirements
+   * @param {string} parent Address in a dot notation
+   * @returns {Array} List of not found structure paths
+   */
+  validateStructure(doc, structure, parent) {
+    let notFound = [],
+      current = '',
+      notValid; // false or path
+
+    parent = parent || '';
+
+    Object.keys(structure).forEach((originKey) => {
+      const optional = originKey.endsWith('?');
+      const key = originKey.replace(/\?$/u, '');
+
+      current = parent;
+      if (!check(structure).is('Array')) {
+        current += (parent.length > 0 ?
+          '.' :
+          '') + key;
+      }
+
+      const item = structure[originKey];
+      if (item instanceof Array) {
+        if (check(doc).has(key) && check(doc[key]).is('Array')) {
+          doc[key].forEach((child, index) => {
+            if (item.length > 1) {
+              notValid = this.validateStructure([child], [item[index]], current + '[' + index + ']');
+            }
+            else {
+              notValid = this.validateStructure([child], item, current + '[' + index + ']');
+            }
+            notFound = notFound.concat(notValid);
+          });
+        }
+        else if (!optional) {
+          notFound.push(current);
+        }
+      }
+      else if (typeof item === 'string') {
+        if (!check(doc).has(key) && optional){
+          notValid = false;
+        }
+        else {
+          notValid = !((check(structure).is('Array') || check(doc).has(key)) && check(doc[key]).is(item));
+        }
+
+        // Key can be a index number when the structure is an array, but passed as a string
+        notFound.push(notValid ?
+          current :
+          false);
+      }
+      else if (typeof item === 'object' && item !== null) {
+        if (!optional) {
+          notValid = this.validateStructure(doc[key], item, current);
+          notFound = notFound.concat(notValid);
+        }
+      }
+    });
+
+    return notFound.filter(function filterFalse(item) {
+      return item !== false;
+    });
+  }
+
+  /**
+   * Parse the given Yaml data.
+   * @param {string} filepath Yaml file path
+   * @param {string} data Yaml data
+   * @returns {string|null} Parsed Yaml or null on failure
+   */
+  loadData(filepath, data) {
+    const onWarning = (error) => {
+      this.errored(filepath + ' > ' + error);
+      if (typeof this.options.onWarning === 'function') {
+        this.options.onWarning.call(this, error, filepath);
+      }
+    };
+    let doc;
+
+    try {
+      doc = yaml.load(data, {
+        onWarning: onWarning
+      });
+    }
+    catch (error) {
+      const findNumber = error.message.match(FIND_LINENUMBER);
+      const lineNumber = findNumber && findNumber.length > 0 ?
+        findNumber[1] :
+        'unknown';
+      this.errored(`Failed to load the Yaml file "${filepath}:${lineNumber}"\n${error.message}`);
+      console.error(`${filepath}:${lineNumber}\n${error.message}`);
+
+      return null;
+    }
+
+    return doc;
+  }
+
+  /**
+   * Read and parse the given Yaml file.
+   * @param {string} filepath Yaml file path
+   * @returns {string|null} Parsed Yaml or null on failure
+   */
+  loadFile(filepath) {
+    // Verbose output will tell which file is being read
+    let data;
+    const _self = this;
+
+    try {
+      data = fs.readFileSync(filepath, 'utf8');
+    }
+    catch (err) {
+      _self.errored(filepath + ' > No such file or directory');
+
+      return null;
+    }
+
+    return this.loadData(filepath, data);
+  }
+
+  /**
+   * Read the given Yaml file, load and check its structure.
+   * @param {string} filepath Yaml file path
+   * @returns {number} 0 when no errors, 1 when errors.
+   */
+  checkFile(filepath) {
+    const doc = this.loadFile(filepath);
+
+    if (!doc) {
+      return 1;
+    }
+
+    if (this.options.writeJson) {
+      const json = JSON.stringify(doc, null, '  ');
+      fs.writeFileSync(filepath.replace(/\.y(a)?ml$/iu, '.json'), json, 'utf8');
+    }
+
+    if (this.options.structure) {
+      const nonValidPaths = this.validateStructure(doc, this.options.structure);
+
+      if (nonValidPaths.length > 0) {
+        this.errored(filepath + ' is not following the correct structure, missing:');
+        this.errored(nonValidPaths.join('\n'));
+        this.nonValidPaths = this.nonValidPaths.concat(nonValidPaths);
+
+        return 1;
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Create a report out of this, but in reality also run.
+   * @param {array} files List of files that have been checked that they exist
+   * @returns {void}
+   */
+  validate(files) {
+    const _self = this;
+    this.inValidFilesCount = files.map((filepath) => {
+      return _self.checkFile(filepath);
+    }).reduce((prev, curr) => {
+      return prev + curr;
+    }, _self.inValidFilesCount);
+  }
+
+  /**
+   * Create a report out of this, but in reality also run.
+   * @returns {number} 0 when no errors, the count of invalid files otherwise.
+   */
+  report() {
+
+    if (this.inValidFilesCount > 0) {
+      this.errored('Yaml format related errors in ' + this.inValidFilesCount + ' files');
+    }
+
+    const len = this.nonValidPaths.length;
+    this.errored('Total of ' + len + ' structure validation error(s)');
+
+    if (typeof this.options.log === 'string') {
+      fs.writeFileSync(this.options.log, this.logs.join('\n'), 'utf8');
+    }
+
+    return this.inValidFilesCount;
+  }
+}
+
+module.exports = YamlValidatore;
+
+
+/***/ }),
+
+/***/ 301:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/*! check-type@v0.4.11 - 2014-06-28 */
+!function(){"use strict";var a,b,c;a=function(_){var a,b={};return a=function(c){var d={};return d.is=function(a){var d;if(!_.isString(a))throw new Error("Provided type is not a string");if(d=b["is"+a.toLowerCase()],!_.isFunction(d))throw new Error("Unsupported type",a);return d(c)},d.is.not=function(a){return!this(a)},d.has=function(a){var b,d,e=!0;if(!_.isString(a))throw new Error("Provided path is not a string");return b=a.split("."),d=c,b.forEach(function(a){e&&_.isObject(d)&&!_.isUndefined(d[a])?d=d[a]:e=!1}),e},d.matches=function(b){var d=!0;if(!_.isObject(b))throw new Error("Provided stucture is not an object");return _.isObject(c)?(_.each(b,function(b,e){a(c[e]).is.not(b)&&(d=!1)}),d):!1},d},a.init=function(a,c){var d,e;return _.isUndefined(a)?(a=_,e=_.without(_.functions(a),"isEqual")):e=_.functions(a),d=_.reduce(e,function(b,c){return b[c]=a[c],b},{}),Object.keys(d).forEach(function(a){a.match(/^is[A-Z]/)&&(_.isUndefined(b[a.toLowerCase()])||c)&&(b[a.toLowerCase()]=d[a])}),this},a.clear=function(){return b={},this},a}, true&&(module.exports=a(__nccwpck_require__(69))),"undefined"!=typeof define?define(["underscore"],function(_){return a(_)}):"undefined"!=typeof window&&(b=a(window._),c=function(){var a=window.check;return function(){return b===window.check&&(window.check=a),b}}(),b.noConflict=c,window.check=b)}();
+
+/***/ }),
+
+/***/ 688:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 
-var loader = __nccwpck_require__(161);
-var dumper = __nccwpck_require__(866);
+var loader = __nccwpck_require__(288);
+var dumper = __nccwpck_require__(730);
 
 
 function renamed(from, to) {
@@ -1405,33 +1937,16 @@ function renamed(from, to) {
 }
 
 
-module.exports.Type = __nccwpck_require__(73);
-module.exports.Schema = __nccwpck_require__(82);
-module.exports.FAILSAFE_SCHEMA = __nccwpck_require__(562);
-module.exports.JSON_SCHEMA = __nccwpck_require__(35);
-module.exports.CORE_SCHEMA = __nccwpck_require__(11);
-module.exports.DEFAULT_SCHEMA = __nccwpck_require__(759);
+module.exports.Type = __nccwpck_require__(438);
+module.exports.Schema = __nccwpck_require__(211);
+module.exports.FAILSAFE_SCHEMA = __nccwpck_require__(101);
+module.exports.JSON_SCHEMA = __nccwpck_require__(612);
+module.exports.CORE_SCHEMA = __nccwpck_require__(140);
+module.exports.DEFAULT_SCHEMA = __nccwpck_require__(559);
 module.exports.load                = loader.load;
 module.exports.loadAll             = loader.loadAll;
 module.exports.dump                = dumper.dump;
-module.exports.YAMLException = __nccwpck_require__(179);
-
-// Re-export all types in case user wants to create custom schema
-module.exports.types = {
-  binary:    __nccwpck_require__(900),
-  float:     __nccwpck_require__(705),
-  map:       __nccwpck_require__(150),
-  null:      __nccwpck_require__(721),
-  pairs:     __nccwpck_require__(860),
-  set:       __nccwpck_require__(548),
-  timestamp: __nccwpck_require__(212),
-  bool:      __nccwpck_require__(993),
-  int:       __nccwpck_require__(615),
-  merge:     __nccwpck_require__(104),
-  omap:      __nccwpck_require__(46),
-  seq:       __nccwpck_require__(546),
-  str:       __nccwpck_require__(619)
-};
+module.exports.YAMLException = __nccwpck_require__(455);
 
 // Removed functions from JS-YAML 3.0.x
 module.exports.safeLoad            = renamed('safeLoad', 'load');
@@ -1441,7 +1956,7 @@ module.exports.safeDump            = renamed('safeDump', 'dump');
 
 /***/ }),
 
-/***/ 829:
+/***/ 461:
 /***/ ((module) => {
 
 "use strict";
@@ -1508,7 +2023,7 @@ module.exports.extend         = extend;
 
 /***/ }),
 
-/***/ 866:
+/***/ 730:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -1516,9 +2031,9 @@ module.exports.extend         = extend;
 
 /*eslint-disable no-use-before-define*/
 
-var common              = __nccwpck_require__(829);
-var YAMLException       = __nccwpck_require__(179);
-var DEFAULT_SCHEMA      = __nccwpck_require__(759);
+var common              = __nccwpck_require__(461);
+var YAMLException       = __nccwpck_require__(455);
+var DEFAULT_SCHEMA      = __nccwpck_require__(559);
 
 var _toString       = Object.prototype.toString;
 var _hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -2481,7 +2996,7 @@ module.exports.dump = dump;
 
 /***/ }),
 
-/***/ 179:
+/***/ 455:
 /***/ ((module) => {
 
 "use strict";
@@ -2544,7 +3059,7 @@ module.exports = YAMLException;
 
 /***/ }),
 
-/***/ 161:
+/***/ 288:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -2552,10 +3067,10 @@ module.exports = YAMLException;
 
 /*eslint-disable max-len,no-use-before-define*/
 
-var common              = __nccwpck_require__(829);
-var YAMLException       = __nccwpck_require__(179);
-var makeSnippet         = __nccwpck_require__(975);
-var DEFAULT_SCHEMA      = __nccwpck_require__(759);
+var common              = __nccwpck_require__(461);
+var YAMLException       = __nccwpck_require__(455);
+var makeSnippet         = __nccwpck_require__(420);
+var DEFAULT_SCHEMA      = __nccwpck_require__(559);
 
 
 var _hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -4279,7 +4794,7 @@ module.exports.load    = load;
 
 /***/ }),
 
-/***/ 82:
+/***/ 211:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4287,29 +4802,29 @@ module.exports.load    = load;
 
 /*eslint-disable max-len*/
 
-var YAMLException = __nccwpck_require__(179);
-var Type          = __nccwpck_require__(73);
+var YAMLException = __nccwpck_require__(455);
+var Type          = __nccwpck_require__(438);
 
 
-function compileList(schema, name) {
-  var result = [];
+function compileList(schema, name, result) {
+  var exclude = [];
 
   schema[name].forEach(function (currentType) {
-    var newIndex = result.length;
-
     result.forEach(function (previousType, previousIndex) {
       if (previousType.tag === currentType.tag &&
           previousType.kind === currentType.kind &&
           previousType.multi === currentType.multi) {
 
-        newIndex = previousIndex;
+        exclude.push(previousIndex);
       }
     });
 
-    result[newIndex] = currentType;
+    result.push(currentType);
   });
 
-  return result;
+  return result.filter(function (type, index) {
+    return exclude.indexOf(index) === -1;
+  });
 }
 
 
@@ -4395,8 +4910,8 @@ Schema.prototype.extend = function extend(definition) {
   result.implicit = (this.implicit || []).concat(implicit);
   result.explicit = (this.explicit || []).concat(explicit);
 
-  result.compiledImplicit = compileList(result, 'implicit');
-  result.compiledExplicit = compileList(result, 'explicit');
+  result.compiledImplicit = compileList(result, 'implicit', []);
+  result.compiledExplicit = compileList(result, 'explicit', []);
   result.compiledTypeMap  = compileMap(result.compiledImplicit, result.compiledExplicit);
 
   return result;
@@ -4408,7 +4923,7 @@ module.exports = Schema;
 
 /***/ }),
 
-/***/ 11:
+/***/ 140:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4422,12 +4937,12 @@ module.exports = Schema;
 
 
 
-module.exports = __nccwpck_require__(35);
+module.exports = __nccwpck_require__(612);
 
 
 /***/ }),
 
-/***/ 759:
+/***/ 559:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4441,23 +4956,23 @@ module.exports = __nccwpck_require__(35);
 
 
 
-module.exports = (__nccwpck_require__(11).extend)({
+module.exports = (__nccwpck_require__(140).extend)({
   implicit: [
-    __nccwpck_require__(212),
-    __nccwpck_require__(104)
+    __nccwpck_require__(374),
+    __nccwpck_require__(763)
   ],
   explicit: [
-    __nccwpck_require__(900),
-    __nccwpck_require__(46),
-    __nccwpck_require__(860),
-    __nccwpck_require__(548)
+    __nccwpck_require__(565),
+    __nccwpck_require__(198),
+    __nccwpck_require__(1),
+    __nccwpck_require__(851)
   ]
 });
 
 
 /***/ }),
 
-/***/ 562:
+/***/ 101:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4468,21 +4983,21 @@ module.exports = (__nccwpck_require__(11).extend)({
 
 
 
-var Schema = __nccwpck_require__(82);
+var Schema = __nccwpck_require__(211);
 
 
 module.exports = new Schema({
   explicit: [
-    __nccwpck_require__(619),
-    __nccwpck_require__(546),
-    __nccwpck_require__(150)
+    __nccwpck_require__(703),
+    __nccwpck_require__(604),
+    __nccwpck_require__(554)
   ]
 });
 
 
 /***/ }),
 
-/***/ 35:
+/***/ 612:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4497,26 +5012,26 @@ module.exports = new Schema({
 
 
 
-module.exports = (__nccwpck_require__(562).extend)({
+module.exports = (__nccwpck_require__(101).extend)({
   implicit: [
-    __nccwpck_require__(721),
-    __nccwpck_require__(993),
-    __nccwpck_require__(615),
-    __nccwpck_require__(705)
+    __nccwpck_require__(743),
+    __nccwpck_require__(229),
+    __nccwpck_require__(777),
+    __nccwpck_require__(806)
   ]
 });
 
 
 /***/ }),
 
-/***/ 975:
+/***/ 420:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 
-var common = __nccwpck_require__(829);
+var common = __nccwpck_require__(461);
 
 
 // get snippet for a single line, respecting maxLength
@@ -4618,13 +5133,13 @@ module.exports = makeSnippet;
 
 /***/ }),
 
-/***/ 73:
+/***/ 438:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var YAMLException = __nccwpck_require__(179);
+var YAMLException = __nccwpck_require__(455);
 
 var TYPE_CONSTRUCTOR_OPTIONS = [
   'kind',
@@ -4669,7 +5184,6 @@ function Type(tag, options) {
   });
 
   // TODO: Add tag format check.
-  this.options       = options; // keep original options in case user wants to extend this type later
   this.tag           = tag;
   this.kind          = options['kind']          || null;
   this.resolve       = options['resolve']       || function () { return true; };
@@ -4692,7 +5206,7 @@ module.exports = Type;
 
 /***/ }),
 
-/***/ 900:
+/***/ 565:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -4701,7 +5215,7 @@ module.exports = Type;
 /*eslint-disable no-bitwise*/
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 
 // [ 64, 65, 66 ] -> [ padding, CR, LF ]
@@ -4825,13 +5339,13 @@ module.exports = new Type('tag:yaml.org,2002:binary', {
 
 /***/ }),
 
-/***/ 993:
+/***/ 229:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 function resolveYamlBoolean(data) {
   if (data === null) return false;
@@ -4868,14 +5382,14 @@ module.exports = new Type('tag:yaml.org,2002:bool', {
 
 /***/ }),
 
-/***/ 705:
+/***/ 806:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var common = __nccwpck_require__(829);
-var Type   = __nccwpck_require__(73);
+var common = __nccwpck_require__(461);
+var Type   = __nccwpck_require__(438);
 
 var YAML_FLOAT_PATTERN = new RegExp(
   // 2.5e4, 2.5 and integers
@@ -4973,14 +5487,14 @@ module.exports = new Type('tag:yaml.org,2002:float', {
 
 /***/ }),
 
-/***/ 615:
+/***/ 777:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var common = __nccwpck_require__(829);
-var Type   = __nccwpck_require__(73);
+var common = __nccwpck_require__(461);
+var Type   = __nccwpck_require__(438);
 
 function isHexCode(c) {
   return ((0x30/* 0 */ <= c) && (c <= 0x39/* 9 */)) ||
@@ -5137,13 +5651,13 @@ module.exports = new Type('tag:yaml.org,2002:int', {
 
 /***/ }),
 
-/***/ 150:
+/***/ 554:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 module.exports = new Type('tag:yaml.org,2002:map', {
   kind: 'mapping',
@@ -5153,13 +5667,13 @@ module.exports = new Type('tag:yaml.org,2002:map', {
 
 /***/ }),
 
-/***/ 104:
+/***/ 763:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 function resolveYamlMerge(data) {
   return data === '<<' || data === null;
@@ -5173,13 +5687,13 @@ module.exports = new Type('tag:yaml.org,2002:merge', {
 
 /***/ }),
 
-/***/ 721:
+/***/ 743:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 function resolveYamlNull(data) {
   if (data === null) return true;
@@ -5216,13 +5730,13 @@ module.exports = new Type('tag:yaml.org,2002:null', {
 
 /***/ }),
 
-/***/ 46:
+/***/ 198:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 var _hasOwnProperty = Object.prototype.hasOwnProperty;
 var _toString       = Object.prototype.toString;
@@ -5268,13 +5782,13 @@ module.exports = new Type('tag:yaml.org,2002:omap', {
 
 /***/ }),
 
-/***/ 860:
+/***/ 1:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 var _toString = Object.prototype.toString;
 
@@ -5329,13 +5843,13 @@ module.exports = new Type('tag:yaml.org,2002:pairs', {
 
 /***/ }),
 
-/***/ 546:
+/***/ 604:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 module.exports = new Type('tag:yaml.org,2002:seq', {
   kind: 'sequence',
@@ -5345,13 +5859,13 @@ module.exports = new Type('tag:yaml.org,2002:seq', {
 
 /***/ }),
 
-/***/ 548:
+/***/ 851:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 var _hasOwnProperty = Object.prototype.hasOwnProperty;
 
@@ -5382,13 +5896,13 @@ module.exports = new Type('tag:yaml.org,2002:set', {
 
 /***/ }),
 
-/***/ 619:
+/***/ 703:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 module.exports = new Type('tag:yaml.org,2002:str', {
   kind: 'scalar',
@@ -5398,13 +5912,13 @@ module.exports = new Type('tag:yaml.org,2002:str', {
 
 /***/ }),
 
-/***/ 212:
+/***/ 374:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-var Type = __nccwpck_require__(73);
+var Type = __nccwpck_require__(438);
 
 var YAML_DATE_REGEXP = new RegExp(
   '^([0-9][0-9][0-9][0-9])'          + // [1] year
@@ -5494,287 +6008,7 @@ module.exports = new Type('tag:yaml.org,2002:timestamp', {
 
 /***/ }),
 
-/***/ 294:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-module.exports = __nccwpck_require__(219);
-
-
-/***/ }),
-
-/***/ 219:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var net = __nccwpck_require__(808);
-var tls = __nccwpck_require__(404);
-var http = __nccwpck_require__(685);
-var https = __nccwpck_require__(687);
-var events = __nccwpck_require__(361);
-var assert = __nccwpck_require__(491);
-var util = __nccwpck_require__(837);
-
-
-exports.httpOverHttp = httpOverHttp;
-exports.httpsOverHttp = httpsOverHttp;
-exports.httpOverHttps = httpOverHttps;
-exports.httpsOverHttps = httpsOverHttps;
-
-
-function httpOverHttp(options) {
-  var agent = new TunnelingAgent(options);
-  agent.request = http.request;
-  return agent;
-}
-
-function httpsOverHttp(options) {
-  var agent = new TunnelingAgent(options);
-  agent.request = http.request;
-  agent.createSocket = createSecureSocket;
-  agent.defaultPort = 443;
-  return agent;
-}
-
-function httpOverHttps(options) {
-  var agent = new TunnelingAgent(options);
-  agent.request = https.request;
-  return agent;
-}
-
-function httpsOverHttps(options) {
-  var agent = new TunnelingAgent(options);
-  agent.request = https.request;
-  agent.createSocket = createSecureSocket;
-  agent.defaultPort = 443;
-  return agent;
-}
-
-
-function TunnelingAgent(options) {
-  var self = this;
-  self.options = options || {};
-  self.proxyOptions = self.options.proxy || {};
-  self.maxSockets = self.options.maxSockets || http.Agent.defaultMaxSockets;
-  self.requests = [];
-  self.sockets = [];
-
-  self.on('free', function onFree(socket, host, port, localAddress) {
-    var options = toOptions(host, port, localAddress);
-    for (var i = 0, len = self.requests.length; i < len; ++i) {
-      var pending = self.requests[i];
-      if (pending.host === options.host && pending.port === options.port) {
-        // Detect the request to connect same origin server,
-        // reuse the connection.
-        self.requests.splice(i, 1);
-        pending.request.onSocket(socket);
-        return;
-      }
-    }
-    socket.destroy();
-    self.removeSocket(socket);
-  });
-}
-util.inherits(TunnelingAgent, events.EventEmitter);
-
-TunnelingAgent.prototype.addRequest = function addRequest(req, host, port, localAddress) {
-  var self = this;
-  var options = mergeOptions({request: req}, self.options, toOptions(host, port, localAddress));
-
-  if (self.sockets.length >= this.maxSockets) {
-    // We are over limit so we'll add it to the queue.
-    self.requests.push(options);
-    return;
-  }
-
-  // If we are under maxSockets create a new one.
-  self.createSocket(options, function(socket) {
-    socket.on('free', onFree);
-    socket.on('close', onCloseOrRemove);
-    socket.on('agentRemove', onCloseOrRemove);
-    req.onSocket(socket);
-
-    function onFree() {
-      self.emit('free', socket, options);
-    }
-
-    function onCloseOrRemove(err) {
-      self.removeSocket(socket);
-      socket.removeListener('free', onFree);
-      socket.removeListener('close', onCloseOrRemove);
-      socket.removeListener('agentRemove', onCloseOrRemove);
-    }
-  });
-};
-
-TunnelingAgent.prototype.createSocket = function createSocket(options, cb) {
-  var self = this;
-  var placeholder = {};
-  self.sockets.push(placeholder);
-
-  var connectOptions = mergeOptions({}, self.proxyOptions, {
-    method: 'CONNECT',
-    path: options.host + ':' + options.port,
-    agent: false,
-    headers: {
-      host: options.host + ':' + options.port
-    }
-  });
-  if (options.localAddress) {
-    connectOptions.localAddress = options.localAddress;
-  }
-  if (connectOptions.proxyAuth) {
-    connectOptions.headers = connectOptions.headers || {};
-    connectOptions.headers['Proxy-Authorization'] = 'Basic ' +
-        new Buffer(connectOptions.proxyAuth).toString('base64');
-  }
-
-  debug('making CONNECT request');
-  var connectReq = self.request(connectOptions);
-  connectReq.useChunkedEncodingByDefault = false; // for v0.6
-  connectReq.once('response', onResponse); // for v0.6
-  connectReq.once('upgrade', onUpgrade);   // for v0.6
-  connectReq.once('connect', onConnect);   // for v0.7 or later
-  connectReq.once('error', onError);
-  connectReq.end();
-
-  function onResponse(res) {
-    // Very hacky. This is necessary to avoid http-parser leaks.
-    res.upgrade = true;
-  }
-
-  function onUpgrade(res, socket, head) {
-    // Hacky.
-    process.nextTick(function() {
-      onConnect(res, socket, head);
-    });
-  }
-
-  function onConnect(res, socket, head) {
-    connectReq.removeAllListeners();
-    socket.removeAllListeners();
-
-    if (res.statusCode !== 200) {
-      debug('tunneling socket could not be established, statusCode=%d',
-        res.statusCode);
-      socket.destroy();
-      var error = new Error('tunneling socket could not be established, ' +
-        'statusCode=' + res.statusCode);
-      error.code = 'ECONNRESET';
-      options.request.emit('error', error);
-      self.removeSocket(placeholder);
-      return;
-    }
-    if (head.length > 0) {
-      debug('got illegal response body from proxy');
-      socket.destroy();
-      var error = new Error('got illegal response body from proxy');
-      error.code = 'ECONNRESET';
-      options.request.emit('error', error);
-      self.removeSocket(placeholder);
-      return;
-    }
-    debug('tunneling connection has established');
-    self.sockets[self.sockets.indexOf(placeholder)] = socket;
-    return cb(socket);
-  }
-
-  function onError(cause) {
-    connectReq.removeAllListeners();
-
-    debug('tunneling socket could not be established, cause=%s\n',
-          cause.message, cause.stack);
-    var error = new Error('tunneling socket could not be established, ' +
-                          'cause=' + cause.message);
-    error.code = 'ECONNRESET';
-    options.request.emit('error', error);
-    self.removeSocket(placeholder);
-  }
-};
-
-TunnelingAgent.prototype.removeSocket = function removeSocket(socket) {
-  var pos = this.sockets.indexOf(socket)
-  if (pos === -1) {
-    return;
-  }
-  this.sockets.splice(pos, 1);
-
-  var pending = this.requests.shift();
-  if (pending) {
-    // If we have pending requests and a socket gets closed a new one
-    // needs to be created to take over in the pool for the one that closed.
-    this.createSocket(pending, function(socket) {
-      pending.request.onSocket(socket);
-    });
-  }
-};
-
-function createSecureSocket(options, cb) {
-  var self = this;
-  TunnelingAgent.prototype.createSocket.call(self, options, function(socket) {
-    var hostHeader = options.request.getHeader('host');
-    var tlsOptions = mergeOptions({}, self.options, {
-      socket: socket,
-      servername: hostHeader ? hostHeader.replace(/:.*$/, '') : options.host
-    });
-
-    // 0 is dummy port for v0.6
-    var secureSocket = tls.connect(0, tlsOptions);
-    self.sockets[self.sockets.indexOf(socket)] = secureSocket;
-    cb(secureSocket);
-  });
-}
-
-
-function toOptions(host, port, localAddress) {
-  if (typeof host === 'string') { // since v0.10
-    return {
-      host: host,
-      port: port,
-      localAddress: localAddress
-    };
-  }
-  return host; // for v0.11 or later
-}
-
-function mergeOptions(target) {
-  for (var i = 1, len = arguments.length; i < len; ++i) {
-    var overrides = arguments[i];
-    if (typeof overrides === 'object') {
-      var keys = Object.keys(overrides);
-      for (var j = 0, keyLen = keys.length; j < keyLen; ++j) {
-        var k = keys[j];
-        if (overrides[k] !== undefined) {
-          target[k] = overrides[k];
-        }
-      }
-    }
-  }
-  return target;
-}
-
-
-var debug;
-if (process.env.NODE_DEBUG && /\btunnel\b/.test(process.env.NODE_DEBUG)) {
-  debug = function() {
-    var args = Array.prototype.slice.call(arguments);
-    if (typeof args[0] === 'string') {
-      args[0] = 'TUNNEL: ' + args[0];
-    } else {
-      args.unshift('TUNNEL:');
-    }
-    console.error.apply(console, args);
-  }
-} else {
-  debug = function() {};
-}
-exports.debug = debug; // for test
-
-
-/***/ }),
-
-/***/ 987:
+/***/ 69:
 /***/ (function(module, exports) {
 
 //     Underscore.js 1.6.0
@@ -7118,244 +7352,6 @@ exports.debug = debug; // for test
     });
   }
 }).call(this);
-
-
-/***/ }),
-
-/***/ 551:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-/**
- * yaml-validator
- * https://github.com/paazmaya/yaml-validator
- *
- * Copyright (c) Juga Paazmaya <paazmaya@yahoo.com> (https://paazmaya.fi)
- * Licensed under the MIT license.
- */
-
-const fs = __nccwpck_require__(147);
-
-const yaml = __nccwpck_require__(917);
-const check = (__nccwpck_require__(34).init)();
-
-const FIND_LINENUMBER = /line (\d+)/u;
-
-class YamlValidatore {
-  constructor (options) {
-    this.options = Object.assign({
-      log: false,
-      structure: false,
-      onWarning: null,
-      writeJson: false
-    }, options);
-
-    this.logs = [];
-    this.nonValidPaths = []; // list of property paths
-    this.inValidFilesCount = 0;
-  }
-
-  /**
-   * Store log messages
-   * possible later use by writing a log file.
-   * @param {string} msg Error message
-   * @returns {void}
-   */
-  errored(msg) {
-    this.logs.push(msg);
-  }
-
-  /**
-   * Check that the given structure is available.
-   * @param {Object} doc Object loaded from Yaml file
-   * @param {Object} structure Structure requirements
-   * @param {string} parent Address in a dot notation
-   * @returns {Array} List of not found structure paths
-   */
-  validateStructure(doc, structure, parent) {
-    let notFound = [],
-      current = '',
-      notValid; // false or path
-
-    parent = parent || '';
-
-    Object.keys(structure).forEach((originKey) => {
-      const optional = originKey.endsWith('?');
-      const key = originKey.replace(/\?$/u, '');
-
-      current = parent;
-      if (!check(structure).is('Array')) {
-        current += (parent.length > 0 ?
-          '.' :
-          '') + key;
-      }
-
-      const item = structure[originKey];
-      if (item instanceof Array) {
-        if (check(doc).has(key) && check(doc[key]).is('Array')) {
-          doc[key].forEach((child, index) => {
-            if (item.length > 1) {
-              notValid = this.validateStructure([child], [item[index]], current + '[' + index + ']');
-            }
-            else {
-              notValid = this.validateStructure([child], item, current + '[' + index + ']');
-            }
-            notFound = notFound.concat(notValid);
-          });
-        }
-        else if (!optional) {
-          notFound.push(current);
-        }
-      }
-      else if (typeof item === 'string') {
-        if (!check(doc).has(key) && optional){
-          notValid = false;
-        }
-        else {
-          notValid = !((check(structure).is('Array') || check(doc).has(key)) && check(doc[key]).is(item));
-        }
-
-        // Key can be a index number when the structure is an array, but passed as a string
-        notFound.push(notValid ?
-          current :
-          false);
-      }
-      else if (typeof item === 'object' && item !== null) {
-        if (!optional) {
-          notValid = this.validateStructure(doc[key], item, current);
-          notFound = notFound.concat(notValid);
-        }
-      }
-    });
-
-    return notFound.filter(function filterFalse(item) {
-      return item !== false;
-    });
-  }
-
-  /**
-   * Parse the given Yaml data.
-   * @param {string} filepath Yaml file path
-   * @param {string} data Yaml data
-   * @returns {string|null} Parsed Yaml or null on failure
-   */
-  loadData(filepath, data) {
-    const onWarning = (error) => {
-      this.errored(filepath + ' > ' + error);
-      if (typeof this.options.onWarning === 'function') {
-        this.options.onWarning.call(this, error, filepath);
-      }
-    };
-    let doc;
-
-    try {
-      doc = yaml.load(data, {
-        onWarning: onWarning
-      });
-    }
-    catch (error) {
-      const findNumber = error.message.match(FIND_LINENUMBER);
-      const lineNumber = findNumber && findNumber.length > 0 ?
-        findNumber[1] :
-        'unknown';
-      this.errored(`Failed to load the Yaml file "${filepath}:${lineNumber}"\n${error.message}`);
-      console.error(`${filepath}:${lineNumber}\n${error.message}`);
-
-      return null;
-    }
-
-    return doc;
-  }
-
-  /**
-   * Read and parse the given Yaml file.
-   * @param {string} filepath Yaml file path
-   * @returns {string|null} Parsed Yaml or null on failure
-   */
-  loadFile(filepath) {
-    // Verbose output will tell which file is being read
-    let data;
-    const _self = this;
-
-    try {
-      data = fs.readFileSync(filepath, 'utf8');
-    }
-    catch (err) {
-      _self.errored(filepath + ' > No such file or directory');
-
-      return null;
-    }
-
-    return this.loadData(filepath, data);
-  }
-
-  /**
-   * Read the given Yaml file, load and check its structure.
-   * @param {string} filepath Yaml file path
-   * @returns {number} 0 when no errors, 1 when errors.
-   */
-  checkFile(filepath) {
-    const doc = this.loadFile(filepath);
-
-    if (!doc) {
-      return 1;
-    }
-
-    if (this.options.writeJson) {
-      const json = JSON.stringify(doc, null, '  ');
-      fs.writeFileSync(filepath.replace(/\.y(a)?ml$/iu, '.json'), json, 'utf8');
-    }
-
-    if (this.options.structure) {
-      const nonValidPaths = this.validateStructure(doc, this.options.structure);
-
-      if (nonValidPaths.length > 0) {
-        this.errored(filepath + ' is not following the correct structure, missing:');
-        this.errored(nonValidPaths.join('\n'));
-        this.nonValidPaths = this.nonValidPaths.concat(nonValidPaths);
-
-        return 1;
-      }
-    }
-
-    return 0;
-  }
-
-  /**
-   * Create a report out of this, but in reality also run.
-   * @param {array} files List of files that have been checked that they exist
-   * @returns {void}
-   */
-  validate(files) {
-    const _self = this;
-    this.inValidFilesCount = files.map((filepath) => {
-      return _self.checkFile(filepath);
-    }).reduce((prev, curr) => {
-      return prev + curr;
-    }, _self.inValidFilesCount);
-  }
-
-  /**
-   * Create a report out of this, but in reality also run.
-   * @returns {number} 0 when no errors, the count of invalid files otherwise.
-   */
-  report() {
-
-    if (this.inValidFilesCount > 0) {
-      this.errored('Yaml format related errors in ' + this.inValidFilesCount + ' files');
-    }
-
-    const len = this.nonValidPaths.length;
-    this.errored('Total of ' + len + ' structure validation error(s)');
-
-    if (typeof this.options.log === 'string') {
-      fs.writeFileSync(this.options.log, this.logs.join('\n'), 'utf8');
-    }
-
-    return this.inValidFilesCount;
-  }
-}
-
-module.exports = YamlValidatore;
 
 
 /***/ }),
