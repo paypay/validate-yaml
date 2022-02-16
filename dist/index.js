@@ -51,10 +51,10 @@ function run() {
                 validatorLog: logFile
             });
             const failure = (core.getInput('allow_failure') || 'false').toUpperCase() === 'TRUE';
-            const inValidCount = yield validator.ValidateYAML();
+            const invalidationsCount = yield validator.ValidateYAML();
             const validatorLog = fs_1.default.readFileSync(logFile, { encoding: 'utf-8' });
             core.info(validatorLog);
-            if (inValidCount === 0) {
+            if (invalidationsCount === 0) {
                 core.info('🎉 All files successfully validated');
             }
             else {
@@ -65,7 +65,7 @@ function run() {
                     core.info('❗Validation error(s)');
                 }
             }
-            core.setOutput('inValid_count', inValidCount);
+            core.setOutput('invalidations_count', invalidationsCount);
         }
         catch (error) {
             core.setFailed(error.message);

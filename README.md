@@ -79,4 +79,4 @@ The following input variables options can/must be configured:
 |`allow_failure`|Optional|Makes the Action fail on validation errors.|`false`|
 
 ## Outputs
-- `inValid_count`: Outputs the count of validation errors.
+- `invalidations_count`: Outputs the count of validation errors.

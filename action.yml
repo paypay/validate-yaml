@@ -13,8 +13,8 @@ inputs:
     default: false
     required: false
 outputs:
-  inValid_files_count:
-    description: 'inValid files count.'
+  invalidations_count:
+    description: 'Count of validation errors.'
 runs:
   using: "node12"
   main: "dist/index.js"
