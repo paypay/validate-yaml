@@ -68,3 +68,15 @@ test:
   }
 }
 ```
+## Options ⚙️
+
+The following input variables options can/must be configured:
+
+|Input variable|Necessity|Description|Default|
+|----|----|----|----|
+|`schemaPath`|Required|string with paths to files and directories of the JSON schema file.||
+|`files`|Required|Comma separated string with paths to files and directories to check for.||
+|`allow_failure`|Optional|Makes the Action fail on validation errors.|`false`|
+
+## Outputs
+- `inValid_count`: Outputs the count of validation errors.

@@ -13,11 +13,11 @@ async function run(): Promise<void> {
     const failure: boolean =
       (core.getInput('allow_failure') || 'false').toUpperCase() === 'TRUE'
 
-    const inValidFilesCount = await validator.ValidateYAML()
+    const inValidCount = await validator.ValidateYAML()
     const validatorLog = fs.readFileSync(logFile, {encoding: 'utf-8'})
     core.info(validatorLog)
 
-    if (inValidFilesCount === 0) {
+    if (inValidCount === 0) {
       core.info('🎉 All files successfully validated')
     } else {
       if (failure) {
@@ -26,7 +26,7 @@ async function run(): Promise<void> {
         core.info('❗Validation error(s)')
       }
     }
-    core.setOutput('inValid_files_count', inValidFilesCount)
+    core.setOutput('inValid_count', inValidCount)
   } catch (error) {
     core.setFailed((error as Error).message)
   }

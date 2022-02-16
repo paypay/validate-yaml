@@ -50,15 +50,22 @@ function run() {
                 schemaPath: core.getInput('schemaPath'),
                 validatorLog: logFile
             });
-            const inValidFilesCount = yield validator.ValidateYAML();
+            const failure = (core.getInput('allow_failure') || 'false').toUpperCase() === 'TRUE';
+            const inValidCount = yield validator.ValidateYAML();
             const validatorLog = fs_1.default.readFileSync(logFile, { encoding: 'utf-8' });
             core.info(validatorLog);
-            if (inValidFilesCount === 0) {
+            if (inValidCount === 0) {
                 core.info('🎉 All files successfully validated');
             }
             else {
-                core.setFailed('❗Validation error(s)');
+                if (failure) {
+                    core.setFailed('❗Validation error(s)');
+                }
+                else {
+                    core.info('❗Validation error(s)');
+                }
             }
+            core.setOutput('inValid_count', inValidCount);
         }
         catch (error) {
             core.setFailed(error.message);
